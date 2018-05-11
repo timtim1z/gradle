@@ -15,14 +15,11 @@
  * limitations under the License.
  */
 import org.apache.tools.ant.filters.ReplaceTokens
+import org.asciidoctor.gradle.AsciidoctorTask
 import org.gradle.build.docs.AssembleSamplesDocTask
-import org.gradle.build.docs.CacheableAsciidoctorTask
 import org.gradle.build.docs.Docbook2Xhtml
-import org.gradle.build.docs.ExtractSamplesTask
 import org.gradle.build.docs.ExtractSnippetsTask
-import org.gradle.build.docs.UserGuideSectionVerifier
 import org.gradle.build.docs.UserGuideTransformTask
-import org.gradle.build.docs.Xhtml2Pdf
 import org.gradle.build.docs.dsl.docbook.AssembleDslDocTask
 import org.gradle.build.docs.dsl.source.ExtractDslMetaDataTask
 import org.gradle.build.docs.dsl.source.GenerateDefaultImportsTask
@@ -33,10 +30,6 @@ import org.gradle.gradlebuild.ProjectGroups
 import org.gradle.gradlebuild.PublicApi
 import org.gradle.gradlebuild.docs.PegDown
 import org.gradle.gradlebuild.unittestandcompile.ModuleType
-
-import javax.xml.transform.TransformerFactory
-import javax.xml.transform.stream.StreamResult
-import javax.xml.transform.stream.StreamSource
 
 plugins {
     id 'base'
@@ -111,47 +104,7 @@ outputs.distDocs = files(distDocsDir) {
     builtBy 'distDocs'
 }
 outputs.docs = files(docsDir) {
-    builtBy 'javadocAll', 'userguide', 'dslHtml', 'releaseNotes'
-}
-
-tasks.withType(CacheableAsciidoctorTask) {
-    backends = ['docbook']
-
-    separateOutputDirs = false
-    options doctype: 'book'
-    inputs.file asciidocSanitizeStylesheet withPropertyName "sanitizerStylesheet" withPathSensitivity PathSensitivity.NONE
-
-    extensions {
-        inlinemacro (name: "api") {
-            parent, target, attributes ->
-            def (className, method) = target.split('#', 2) as List
-            def content = "<apilink class=\"$className\""
-            if (method) {
-                // Add space after comma, because we can't have spaces in api: targets
-                // Restore Asciidoc's '&hellip;&zwsp;' replacement to the original '...'
-                content += " method=\"${method.replaceAll(/,\s*/, ', ').replaceAll(/\&#8230;\&#8203;/, '...')}\""
-            }
-            content += " />"
-            return content
-        }
-    }
-
-    attributes 'source-highlighter': 'prettify',
-               website: 'http://www.gradle.org',
-               javaApi: 'https://docs.oracle.com/javase/7/docs/api',
-               antManual: 'https://ant.apache.org/manual'
-
-    doLast {
-        outputDir.eachFileMatch(~/.*.xml/) { File file ->
-            def contents = file.getText("utf-8")
-            try {
-                def transformer = TransformerFactory.newInstance().newTransformer(new StreamSource(asciidocSanitizeStylesheet))
-                transformer.transform(new StreamSource(new StringReader(contents)), new StreamResult(file))
-            } catch (Exception ex) {
-                throw new RuntimeException("Couldn't process $file:\n" + contents, ex)
-            }
-        }
-    }
+    builtBy 'javadocAll', 'asciidoctor', 'dslHtml', 'releaseNotes'
 }
 
 tasks.withType(Docbook2Xhtml) {
@@ -164,16 +117,9 @@ tasks.withType(UserGuideTransformTask) {
     dependsOn samples, dslDocbook
     snippetsDir = samples.snippetsDir
     linksFile = dslDocbook.linksFile
-    websiteUrl = 'http://www.gradle.org'
-
-    if (name in ["pdfUserguideDocbook"]) {
-        // These will only be valid for releases, but that's ok
-        javadocUrl = "http://www.gradle.org/docs/${->version}/javadoc"
-        dsldocUrl = "http://www.gradle.org/docs/${->version}/dsl"
-    } else {
-        javadocUrl = '../javadoc'
-        dsldocUrl = '../dsl'
-    }
+    websiteUrl = 'https://gradle.org'
+    javadocUrl = '../javadoc'
+    dsldocUrl = '../dsl'
 }
 
 tasks.withType(AssembleDslDocTask) {
@@ -238,22 +184,7 @@ task userguideStyleSheets(type: Copy) {
     }
 }
 
-tasks.remove(asciidoctor)
-
 def generatedResourcesDir = gradlebuildJava.generatedResourcesDir
-
-task userguideAsciidoc(type: CacheableAsciidoctorTask) {
-    sourceDir = userguideSrcDir
-    sources { include '*.adoc' }
-    outputDir = asciidocOutputDir
-    inputs.file { defaultImports.importsDestFile } withPropertyName 'defaultImports' withPathSensitivity PathSensitivity.NONE
-
-    // we pull the default-imports from here:
-    resources {
-        from(generatedResourcesDir)
-        include "**/*.txt"
-    }
-}
 
 task samplesDocbook(type: AssembleSamplesDocTask) {
     source samplesSrcDir
@@ -318,90 +249,6 @@ task dslHtml(type: Docbook2Xhtml) {
     ext.entryPoint = "$destDir/index.html"
 }
 
-task checkSectionIds(type: UserGuideSectionVerifier) {
-    dependsOn userguideAsciidoc
-    docbookFiles = files(
-        fileTree(userguideSrcDir) { include "**/*.xml" },
-        userguideAsciidoc.outputs.files
-    )
-}
-
-[configureCss, samples, samplesDocbook]*.mustRunAfter(checkSectionIds)
-
-task extractSamples(type: ExtractSamplesTask) {
-    // We need default imports since it is included by userguide.xml
-    // We need samplesList.xml (generated by samplesDocbook) since it is included by userguide.xml
-    // Both files are not an input since they do not affect the generated samples.xml
-    dependsOn defaultImports, samplesDocbook, userguideAsciidoc
-    sourceFile = new File(userguideSrcDir, 'userguide.xml')
-    destFile = new File(docbookSrc, 'samples.xml')
-}
-
-// This is used in the distribution and for the online version
-task userguideDocbook(type: UserGuideTransformTask) {
-    destFile = new File(docbookSrc, 'userguide.xml')
-    dependsOn checkSectionIds
-}
-
-// This is used for the PDF, where we need absolute links to the javadoc etc.
-task pdfUserguideDocbook(type: UserGuideTransformTask) {
-    destFile = new File(docbookSrc, 'remoteUserguide.xml')
-}
-
-configure([userguideDocbook, pdfUserguideDocbook]) {
-    // The master userguide.xml pulls these files in via xi:include, making them input
-    includes = files(
-        samplesDocbook,
-        defaultImports.importsDestFile,
-        fileTree(dir: userguideSrcDir, includes: ['*.xml']),
-        userguideAsciidoc.outputs.files
-    )
-
-    dependsOn samples, samplesDocbook, defaultImports
-
-    sourceFile new File(userguideSrcDir, 'userguide.xml')
-}
-
-def imageFiles = fileTree(userguideSrcDir) {
-    include 'img/*.png'
-    include 'img/*.gif'
-    include 'img/*.jpg'
-}
-def resourceFiles = imageFiles + cssFiles
-
-task userguideHtml(type: Docbook2Xhtml) {
-    group = "Documentation"
-    source userguideDocbook
-    destDir = userguideDir
-    stylesheetName = 'userGuideHtml.xsl'
-    resources = resourceFiles
-    ext.entryPoint = "$destDir/userguide.html"
-}
-
-task userguideSingleHtml(type: Docbook2Xhtml) {
-    group = "Documentation"
-    source userguideDocbook
-    destFile = new File(userguideDir, 'userguide_single.html')
-    stylesheetName = 'userGuideSingleHtml.xsl'
-    resources = resourceFiles
-    ext.entryPoint = destFile
-}
-
-task pdfUserguideXhtml(type: Docbook2Xhtml) {
-    source pdfUserguideDocbook
-    destFile = new File(buildDir, 'tmp/userguidePdf/userguidePdf.html')
-    stylesheetName = 'userGuidePdf.xsl'
-    resources = resourceFiles
-    ext.entryPoint = destFile
-}
-
-task userguidePdf(type: Xhtml2Pdf, dependsOn: pdfUserguideXhtml) {
-    sourceFile = pdfUserguideXhtml.destFile
-    destFile = new File(userguideDir, 'userguide.pdf')
-    classpath = configurations.userGuideTask
-    resources = resourceFiles
-}
-
 def javaApiUrl = "https://docs.oracle.com/javase/7/docs/api"
 def groovyApiUrl = "http://docs.groovy-lang.org/docs/groovy-${libraries.groovy.version}/html/gapi"
 def mavenApiUrl = "http://maven.apache.org/ref/${libraries.maven3.version}/maven-model/apidocs"
@@ -439,17 +286,68 @@ task checkstyleApi(type: Checkstyle) {
     reports.xml.destination = file("$checkstyle.reportsDir/checkstyle-api.xml")
 }
 
-task distDocs(type: Docbook2Xhtml) {
-    dependsOn userguideAsciidoc
-    source new File(asciidocOutputDir, 'gettingStarted.xml')
-    destFile = new File(distDocsDir, 'getting-started.html')
-    stylesheetName = 'standaloneHtml.xsl'
+task distDocs(type: AsciidoctorTask) {
+    sourceDir = new File(srcDocsDir, 'usermanual')
+    sources { include 'getting-started.adoc' }
+    outputDir = distDocsDir
+    separateOutputDirs = false
+    options doctype: 'book'
+    backends 'html5'
 }
 
-task userguide {
-    dependsOn userguideHtml, userguideSingleHtml, userguidePdf
-    description = 'Generates the userguide'
+asciidoctor {
+    sourceDir = new File(srcDocsDir, 'usermanual')
+    sources { include '*.adoc' }
+    outputDir = userguideDir
+    separateOutputDirs = false
+    options doctype: 'book'
+    backends 'html5'
+
+    attributes stylesdir      : '../css/',
+        stylesheet            : 'manual.css',
+        imagesdir             : 'img',
+        nofooter              : true,
+        // TODO: inline icons instead of resolving from CDN
+//        icons                 : 'image',
+//        iconsdir              : '',
+        icons                 : 'font',
+        // FIXME: i guess this isn't working
+        webfonts              : 'Lato:400,400i,700',
+        'source-highlighter'  : 'prettify',
+        // TODO: inline prettify code highlighting instead of CDN
+//        prettifydir           : '???',
+        sectanchors           : true,
+        sectlinks             : true,
+        linkattrs             : true,
+        reproducible          : '',
+        lang                  : 'en-US',
+        encoding              : 'utf-8',
+        idprefix              : '',
+        toc                   : 'auto',
+        toclevels             : 2,
+        'toc-title'           : 'Contents',
+        website               : 'https://gradle.org',
+        javaApi               : 'https://docs.oracle.com/javase/7/docs/api',
+        antManual             : 'https://ant.apache.org/manual',
+        guides                : 'https://guides.gradle.org',
+        'gradle-version'      : version,
+        'user-manual'         : "https://docs.gradle.org/${version}/userguide",
+        'groovy-dsl-reference': "https://docs.gradle.org/${version}/dsl",
+        'api-reference'       : "https://docs.gradle.org/${version}/javadoc",
+        'samples-relative-dir': "../../samples"
+}
+
+task userManualPdf {
+    // TODO: user manual single to PDF
+}
+
+task userManual {
+    dependsOn asciidoctor, userManualPdf
+    description = 'Generates the userguide HTML and PDF'
     group = 'documentation'
+
+    inputs.dir srcDocsDir
+    outputs.dir new File(distDocsDir, 'usermanual/asciidoc')
 }
 
 task editReleaseNotes() {
@@ -504,7 +402,7 @@ test {
 }
 
 task docs {
-    dependsOn javadocAll, userguide, distDocs, samplesDocs, dslHtml, releaseNotes
+    dependsOn javadocAll, asciidoctor, distDocs, samplesDocs, dslHtml, releaseNotes
     description = 'Generates all documentation'
     group = 'documentation'
 }

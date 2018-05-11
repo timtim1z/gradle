@@ -4,4 +4,5 @@ dependencies {
     implementation(project(":configuration"))
     implementation(project(":kotlinDsl"))
     implementation("org.pegdown:pegdown:1.6.0")
+    implementation("org.asciidoctor:asciidoctorj:1.5.6")
 }

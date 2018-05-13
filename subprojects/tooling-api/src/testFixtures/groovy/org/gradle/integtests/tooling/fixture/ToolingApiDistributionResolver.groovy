@@ -165,6 +165,11 @@ class ToolingApiDistributionResolver {
         }
 
         @Override
+        NestedBuildFactory getNestedBuildFactory() {
+            throw new UnsupportedOperationException()
+        }
+
+        @Override
         Path getIdentityPathForProject(Path projectPath) {
             return projectPath
         }

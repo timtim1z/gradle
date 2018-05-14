@@ -18,27 +18,17 @@ package org.gradle.integtests.tooling.fixture
 
 import org.gradle.api.artifacts.Configuration
 import org.gradle.api.artifacts.Dependency
-import org.gradle.api.artifacts.component.BuildIdentifier
-import org.gradle.api.artifacts.component.ProjectComponentIdentifier
-import org.gradle.api.internal.SettingsInternal
-import org.gradle.api.internal.artifacts.DefaultBuildIdentifier
-import org.gradle.api.internal.artifacts.DefaultProjectComponentIdentifier
 import org.gradle.api.internal.artifacts.DependencyResolutionServices
 import org.gradle.api.internal.project.ProjectInternal
-import org.gradle.initialization.NestedBuildFactory
 import org.gradle.integtests.fixtures.executer.GradleContextualExecuter
 import org.gradle.integtests.fixtures.executer.IntegrationTestBuildContext
-import org.gradle.internal.build.BuildState
-import org.gradle.internal.concurrent.CompositeStoppable
 import org.gradle.testfixtures.ProjectBuilder
-import org.gradle.util.Path
 
 class ToolingApiDistributionResolver {
     private final DependencyResolutionServices resolutionServices
     private final Map<String, ToolingApiDistribution> distributions = [:]
     private final IntegrationTestBuildContext buildContext = new IntegrationTestBuildContext()
     private boolean useExternalToolingApiDistribution = false;
-    private CompositeStoppable stopLater = new CompositeStoppable()
 
     ToolingApiDistributionResolver() {
         resolutionServices = createResolutionServices()
@@ -74,7 +64,7 @@ class ToolingApiDistributionResolver {
     }
 
     private DependencyResolutionServices createResolutionServices() {
-        // Create a dummy project
+        // Create a dummy project and use its services
         ProjectInternal project = ProjectBuilder.builder().build()
         return project.services.get(DependencyResolutionServices)
     }
@@ -85,38 +75,5 @@ class ToolingApiDistributionResolver {
     }
 
     void stop() {
-        stopLater.stop()
-    }
-
-    static class EmptyBuild implements BuildState {
-        @Override
-        BuildIdentifier getBuildIdentifier() {
-            return DefaultBuildIdentifier.ROOT
-        }
-
-        @Override
-        boolean isImplicitBuild() {
-            return false
-        }
-
-        @Override
-        SettingsInternal getLoadedSettings() throws IllegalStateException {
-            throw new UnsupportedOperationException()
-        }
-
-        @Override
-        NestedBuildFactory getNestedBuildFactory() {
-            throw new UnsupportedOperationException()
-        }
-
-        @Override
-        Path getIdentityPathForProject(Path projectPath) {
-            return projectPath
-        }
-
-        @Override
-        ProjectComponentIdentifier getIdentifierForProject(Path projectPath) {
-            return new DefaultProjectComponentIdentifier(buildIdentifier, projectPath, projectPath, projectPath.name ?: "root")
-        }
     }
 }

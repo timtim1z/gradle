@@ -180,6 +180,11 @@ public class ProjectBuilderImpl {
         }
 
         @Override
+        public Path getIdentityPath() {
+            return Path.ROOT;
+        }
+
+        @Override
         public boolean isImplicitBuild() {
             return false;
         }
@@ -192,6 +197,11 @@ public class ProjectBuilderImpl {
         @Override
         public NestedBuildFactory getNestedBuildFactory() {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Path getCurrentPrefixForProjectsInChildBuilds() {
+            return Path.ROOT;
         }
 
         @Override
